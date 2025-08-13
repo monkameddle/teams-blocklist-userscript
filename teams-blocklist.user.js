@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Teams: Blocklist Manager (hide messages by sender)
 // @namespace    com.von-luehmann.teams.blocklist
-// @version      2.0
+// @version      2.1
 // @description  Hide Microsoft Teams (web v2) messages from any names on a managed blocklist. Hotkey Ctrl+Alt+B.
 // @match        https://teams.microsoft.com/*
 // @match        https://*.teams.microsoft.com/*
@@ -30,10 +30,8 @@
     }
   };
   const saveBlocklist = (set) => localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
-
   const isBlocked = (name, bl) => bl.has(norm(name));
 
-  // Find the wrapper that hides the *whole* message
   const findMessageContainer = (el) =>
     el.closest('[data-tid="chat-pane-item"]') ||
     el.closest('[data-tid="chat-pane-message"]') ||
@@ -53,10 +51,8 @@
         container.style.display = "none";
         container.setAttribute("data-tm-hidden", "1");
         container.setAttribute("aria-hidden", "true");
-        log("Hid:", name, container);
       }
     } else {
-      // if previously hidden (e.g., changed list), unhide
       if (container.getAttribute("data-tm-hidden") === "1") {
         container.style.display = "";
         container.removeAttribute("data-tm-hidden");
@@ -113,9 +109,16 @@
 
     const chip = document.createElement("span");
     chip.className = BTN_CLASS;
-    chip.textContent = bl.has(name) ? "Unblock" : "Block";
-    chip.setAttribute("data-state", bl.has(name) ? "blocked" : "unblocked");
-    chip.title = bl.has(name) ? `Remove "${name}" from blocklist` : `Add "${name}" to blocklist`;
+    const setChipState = () => {
+      const list = getBlocklist();
+      const blocked = list.has(name);
+      chip.textContent = blocked ? "Unblock" : "Block";
+      chip.setAttribute("data-state", blocked ? "blocked" : "unblocked");
+      chip.title = blocked
+        ? `Remove "${name}" from blocklist`
+        : `Add "${name}" to blocklist`;
+    };
+    setChipState();
 
     chip.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -123,19 +126,16 @@
       const n = norm(name);
       if (list.has(n)) {
         list.delete(n);
-        chip.textContent = "Block";
-        chip.setAttribute("data-state", "unblocked");
       } else {
         list.add(n);
-        chip.textContent = "Unblock";
-        chip.setAttribute("data-state", "blocked");
       }
       saveBlocklist(list);
-      // re-scan nearby (this message)
-      hideIfBlocked(authorEl, list);
+      setChipState();
+
+      // Use rAF to batch DOM reads/writes smoothly.
+      requestAnimationFrame(scanAll);
     });
 
-    // place after name
     authorEl.insertAdjacentElement("afterend", chip);
     authorEl.dataset.tmChipAttached = "1";
   }
@@ -168,6 +168,9 @@
       saveBlocklist(list);
       loadListIntoTextarea();
       inputAdd.value = "";
+
+      // Also reflect imediately in the UI
+      requestAnimationFrame(scanAll);
     });
 
     const row = document.createElement("div");
@@ -192,8 +195,8 @@
           .filter(Boolean)
       );
       saveBlocklist(next);
-      // After saving, immediately re-scan the page
-      scanAll();
+      // Immediately re-scan everything
+      requestAnimationFrame(scanAll);
       closeModal();
     });
 
@@ -218,15 +221,8 @@
     modal.style.display = "flex";
     inputAdd.focus();
   }
-
-  function closeModal() {
-    if (modal) modal.style.display = "none";
-  }
-
-  function loadListIntoTextarea() {
-    const list = [...getBlocklist()].join("\n");
-    textarea.value = list;
-  }
+  function closeModal() { if (modal) modal.style.display = "none"; }
+  function loadListIntoTextarea() { textarea.value = [...getBlocklist()].join("\n"); }
 
   // ---------- scanning ----------
   function processAuthorEl(authorEl, bl) {
@@ -236,9 +232,9 @@
 
   function scanAll() {
     const bl = getBlocklist();
-    document.querySelectorAll('span[data-tid="message-author-name"]').forEach((el) =>
-      processAuthorEl(el, bl)
-    );
+    document
+      .querySelectorAll('span[data-tid="message-author-name"]')
+      .forEach((el) => processAuthorEl(el, bl));
   }
 
   // ---------- hotkeys ----------
@@ -265,19 +261,17 @@
           if (node.matches?.('span[data-tid="message-author-name"]')) {
             processAuthorEl(node, bl);
           } else {
-            node.querySelectorAll?.('span[data-tid="message-author-name"]').forEach((el) =>
-              processAuthorEl(el, bl)
-            );
+            node
+              .querySelectorAll?.('span[data-tid="message-author-name"]')
+              .forEach((el) => processAuthorEl(el, bl));
           }
         }
       }
     });
 
     obs.observe(document.body, { childList: true, subtree: true });
-    log("Observer running");
   }
 
-  // ---------- boot ----------
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true });
   } else {
