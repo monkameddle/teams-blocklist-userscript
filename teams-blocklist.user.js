@@ -112,6 +112,7 @@
     const setChipState = () => {
       const list = getBlocklist();
       const blocked = list.has(name);
+      // unblock for now just dummy content, was thinking about leaving name in chat but only hide message content
       chip.textContent = blocked ? "Unblock" : "Block";
       chip.setAttribute("data-state", blocked ? "blocked" : "unblocked");
       chip.title = blocked
